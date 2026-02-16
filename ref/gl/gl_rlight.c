@@ -369,6 +369,102 @@ static qboolean R_RecursiveLightPoint( model_t *model, mnode_t *node, float p1f,
 	return R_RecursiveLightPoint( model, children[!side], midf, p2f, cv, mid, end );
 }
 
+#define countof(x) (sizeof(x)/sizeof((x)[0]))
+
+/*
+=================
+BSPX_LightGridSingleValue
+
+Gets lightgrid value from BSPX lump
+=================
+*/
+static int BSPX_LightGridSingleValue(bspxlightgrid_t *grid, int x, int y, int z, float w, colorVec* res_diffuse)
+{
+	int i;
+	unsigned int node;
+	bspxlgsamp_t *samp;
+	float lev;
+
+	node = grid->rootnode;
+	while (!(node & LGNODE_LEAF))
+	{
+		bspxlgnode_t *n;
+		if (node & LGNODE_MISSING)
+			return 0;	//failure
+		n = grid->nodes + node;
+		node = n->child[
+				((x>=n->mid[0])<<2)|
+				((y>=n->mid[1])<<1)|
+				((z>=n->mid[2])<<0)];
+	}
+
+	{
+		bspxlgleaf_t *leaf = &grid->leafs[node & ~LGNODE_LEAF];
+		x -= leaf->mins[0];
+		y -= leaf->mins[1];
+		z -= leaf->mins[2];
+		if (x >= leaf->size[0] ||
+			y >= leaf->size[1] ||
+			z >= leaf->size[2])
+			return 0;	//sample we're after is out of bounds...
+
+		i = x + leaf->size[0]*(y + leaf->size[1]*z);
+		samp = leaf->rgbvalues + i;
+
+		w *= (1/256.0);
+
+		for (i = 0; i < countof(samp->map); i++)
+		{
+			if (samp->map[i].style == ((byte)(~0u)))
+				break;	//no more
+			lev = tr.lightstylevalue[samp->map[i].style]*w;
+			res_diffuse->r += samp->map[i].rgb[0] * lev;
+			res_diffuse->g += samp->map[i].rgb[1] * lev;
+			res_diffuse->b += samp->map[i].rgb[2] * lev;
+		}
+	}
+	return 1;
+}
+
+/*
+=================
+BSPX_LightGridValue
+
+Gets lightgrid value from BSPX lump
+=================
+*/
+
+static void BSPX_LightGridValue(bspxlightgrid_t *grid, const vec3_t point, colorVec* res_diffuse)
+{
+	int i, tile[3];
+	float s, w, frac[3];
+
+	res_diffuse->r = res_diffuse->g = res_diffuse->b = res_diffuse->a = 0; //assume worst
+
+	for (i = 0; i < 3; i++)
+	{
+		tile[i] = floor((point[i] - grid->mins[i]) * grid->gridscale[i]);
+		frac[i] = (point[i] - grid->mins[i]) * grid->gridscale[i] - tile[i];
+	}
+
+	for (i = 0, s = 0; i < 8; i++)
+	{
+		w =	((i&1)?frac[0]:1-frac[0])
+		  * ((i&2)?frac[1]:1-frac[1])
+		  * ((i&4)?frac[2]:1-frac[2]);
+		s += w*BSPX_LightGridSingleValue(grid,	tile[0]+!!(i&1),
+												tile[1]+!!(i&2),
+												tile[2]+!!(i&4), w, res_diffuse);
+	}
+	if (s) //average the successful ones
+	{
+		res_diffuse->r *= 1.0/s;
+		res_diffuse->g *= 1.0/s;
+		res_diffuse->b *= 1.0/s;
+		res_diffuse->a *= 1.0/s;
+	}
+}
+
 /*
 =================
 R_LightVec
@@ -460,16 +556,24 @@ R_LightVec
 check bspmodels to get light from
 =================
 */
+
 colorVec R_LightVec( const vec3_t start, const vec3_t end, vec3_t lspot, vec3_t lvec )
 {
-	colorVec	light = R_LightVecInternal( start, end, lspot, lvec );
+    colorVec light;
 
-	if( r_lighting_extended.value && lspot != NULL && lvec != NULL )
-	{
-		// trying to get light from ceiling (but ignore gradient analyze)
-		if(( light.r + light.g + light.b ) == 0 )
-			return R_LightVecInternal( end, start, lspot, lvec );
-	}
+    if (WORLDMODEL->lightgrid && r_lightgrid_octree.value)
+        BSPX_LightGridValue(WORLDMODEL->lightgrid, start, &light);
+    else
+    {
+        light = R_LightVecInternal(start, end, lspot, lvec);
+
+        if (r_lighting_extended.value && lspot != NULL && lvec != NULL)
+        {
+            // trying to get light from ceiling (but ignore gradient analyze)
+            if ((light.r + light.g + light.b) == 0)
+                return R_LightVecInternal(end, start, lspot, lvec);
+        }
+    }
 
 	return light;
 }
@@ -483,9 +587,15 @@ light from floor
 */
 colorVec R_LightPoint( const vec3_t p0 )
 {
-	vec3_t	p1;
+	vec3_t		p1;
+	colorVec	lightcolor;
 
-	VectorSet( p1, p0[0], p0[1], p0[2] - 2048.0f );
-
-	return R_LightVec( p0, p1, NULL, NULL );
+	if ( WORLDMODEL->lightgrid && r_lightgrid_octree.value )
+		BSPX_LightGridValue(WORLDMODEL->lightgrid, p0, &lightcolor);
+	else
+	{
+		VectorSet( p1, p0[0], p0[1], p0[2] - 2048.0f);
+		lightcolor = R_LightVec( p0, p1, NULL, NULL );
+	}
+	return lightcolor;
 }

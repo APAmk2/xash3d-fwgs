@@ -805,6 +805,7 @@ extern convar_t r_ripple_updatetime;
 extern convar_t r_ripple_spawntime;
 extern convar_t r_large_lightmaps;
 extern convar_t r_dlight_virtual_radius;
+extern convar_t r_lightgrid_octree;
 
 //
 // engine shared convars
