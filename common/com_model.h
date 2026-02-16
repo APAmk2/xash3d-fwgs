@@ -331,6 +331,46 @@ typedef struct cache_user_s
 } cache_user_t;
 #endif
 
+#define LGNODE_LEAF		(1u<<31)
+#define LGNODE_MISSING	(1u<<30)
+
+typedef struct bspxlgsamp_s
+{
+	struct
+	{
+		byte style;
+		byte rgb[3];
+	} map[4];
+} bspxlgsamp_t;
+
+typedef struct bspxlgleaf_s
+{
+	int mins[3];
+	int size[3];
+	bspxlgsamp_t *rgbvalues;
+} bspxlgleaf_t;
+
+typedef struct bspxlgnode_s
+{	//this uses an octtree to trim samples.
+	int mid[3];
+	unsigned int child[8];
+} bspxlgnode_t;
+
+typedef struct
+{
+	vec3_t gridscale;
+	unsigned int count[3];
+	vec3_t mins;
+	unsigned int styles;
+
+	unsigned int rootnode;
+
+	unsigned int numnodes;
+	bspxlgnode_t *nodes;
+	unsigned int numleafs;
+	bspxlgleaf_t *leafs;
+} bspxlightgrid_t;
+
 typedef struct model_s
 {
 	char		name[64];		// model name
@@ -400,7 +440,7 @@ typedef struct model_s
 	texture_t		**textures;
 
 	byte		*visdata;
-
+	bspxlightgrid_t *lightgrid;
 	color24		*lightdata;
 	char		*entities;
 //
